@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AutoApply</title>
+<style>
+  :root {
+    --bg: #ffffff; --fg: #14161a; --muted: #6b7280; --line: #e5e7eb;
+    --accent: #1f6feb; --ok: #12805c; --warn: #b45309; --bad: #b42318;
+    --chip: #f3f4f6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0f1115; --fg:#e6e8eb; --muted:#9aa3ae; --line:#252a33;
+            --accent:#589bfd; --ok:#3ecf9a; --warn:#f0a83c; --bad:#f0645a; --chip:#1a1e26; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,sans-serif; }
+  header { display:flex; align-items:baseline; gap:20px; padding:14px 20px; border-bottom:1px solid var(--line); position:sticky; top:0; background:var(--bg); z-index:5; }
+  h1 { font-size:15px; margin:0; letter-spacing:-0.01em; }
+  nav button { background:none; border:none; color:var(--muted); font:inherit; cursor:pointer; padding:4px 2px; border-bottom:2px solid transparent; }
+  nav button.active { color:var(--fg); border-bottom-color:var(--accent); }
+  main { padding:20px; max-width:1200px; }
+  .funnel { display:flex; flex-wrap:wrap; gap:10px; margin-bottom:22px; }
+  .stat { border:1px solid var(--line); border-radius:8px; padding:10px 14px; min-width:120px; }
+  .stat b { display:block; font-size:22px; font-variant-numeric:tabular-nums; }
+  .stat span { color:var(--muted); font-size:12px; }
+  .wrap { overflow-x:auto; }
+  table { border-collapse:collapse; width:100%; min-width:720px; }
+  th, td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--muted); font-weight:500; font-size:12px; text-transform:uppercase; letter-spacing:.04em; }
+  .chip { display:inline-block; padding:1px 8px; border-radius:99px; background:var(--chip); font-size:12px; }
+  .s-submitted,.s-confirmed { color:var(--ok); }
+  .s-needs_input,.s-pending_review { color:var(--warn); }
+  .s-failed,.s-rejected,.s-blocked,.s-declined { color:var(--bad); }
+  .card { border:1px solid var(--line); border-radius:10px; padding:16px; margin-bottom:16px; }
+  .cols { display:grid; grid-template-columns:1fr 1fr; gap:18px; }
+  @media (max-width: 860px) { .cols { grid-template-columns:1fr; } }
+  .jd { max-height:340px; overflow:auto; white-space:pre-wrap; font-size:13px; color:var(--muted); }
+  ul.bullets { padding-left:18px; margin:6px 0; }
+  ul.bullets li { margin-bottom:6px; cursor:help; border-left:2px solid transparent; padding-left:6px; }
+  ul.bullets li:hover { border-left-color:var(--accent); }
+  .fact { color:var(--muted); font-size:11px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+  button.act { border:1px solid var(--line); background:var(--chip); color:var(--fg); border-radius:6px; padding:6px 12px; font:inherit; cursor:pointer; }
+  button.act.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+  .log { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; background:var(--chip); border-radius:8px; padding:10px; height:420px; overflow:auto; white-space:pre-wrap; }
+  .log .warn { color:var(--warn); } .log .error { color:var(--bad); }
+  .muted { color:var(--muted); }
+  .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:12px; }
+  input, select { background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:6px 8px; font:inherit; }
+</style>
+</head>
+<body>
+<header>
+  <h1>AutoApply</h1>
+  <nav>
+    <button data-tab="dashboard" class="active">Dashboard</button>
+    <button data-tab="review">Review queue</button>
+    <button data-tab="apps">Applications</button>
+    <button data-tab="runs">Run log</button>
+  </nav>
+  <span style="margin-left:auto" class="muted">
+    token <input id="token" type="password" size="14" placeholder="API token">
+  </span>
+</header>
+<main>
+  <section id="dashboard"></section>
+  <section id="review" hidden></section>
+  <section id="apps" hidden></section>
+  <section id="runs" hidden></section>
+</main>
+
+<script>
+const $ = (sel, root = document) => root.querySelector(sel);
+const el = (tag, attrs = {}, ...kids) => {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "class") node.className = v;
+    else if (k === "html") node.innerHTML = v;
+    else if (k.startsWith("on")) node.addEventListener(k.slice(2), v);
+    else if (v !== null && v !== undefined) node.setAttribute(k, v);
+  }
+  for (const kid of kids.flat()) node.append(kid?.nodeType ? kid : document.createTextNode(kid ?? ""));
+  return node;
+};
+
+const token = () => $("#token").value || localStorage.getItem("autoapply_token") || "";
+$("#token").value = localStorage.getItem("autoapply_token") || "";
+$("#token").addEventListener("change", (e) => localStorage.setItem("autoapply_token", e.target.value));
+
+async function api(path, options = {}) {
+  const res = await fetch(path, {
+    ...options,
+    headers: { "content-type": "application/json", authorization: `Bearer ${token()}`, ...(options.headers || {}) },
+  });
+  if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
+  return res.status === 204 ? null : res.json();
+}
+
+document.querySelectorAll("nav button").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll("nav button").forEach((b) => b.classList.toggle("active", b === btn));
+    for (const s of document.querySelectorAll("main > section")) s.hidden = s.id !== btn.dataset.tab;
+    render(btn.dataset.tab);
+  });
+});
+
+async function render(tab) {
+  const target = $("#" + tab);
+  target.replaceChildren(el("p", { class: "muted" }, "Loading…"));
+  try {
+    if (tab === "dashboard") await renderDashboard(target);
+    if (tab === "review") await renderReview(target);
+    if (tab === "apps") await renderApps(target);
+    if (tab === "runs") await renderRuns(target);
+  } catch (err) {
+    target.replaceChildren(el("p", { class: "muted" }, String(err)));
+  }
+}
+
+async function renderDashboard(target) {
+  const stats = await api("/api/stats");
+  const f = stats.funnel;
+  const cards = [
+    ["Discovered", f.discovered], ["Matched", f.matched],
+    ["Submitted", f.submitted], ["Responses", f.responses],
+    ["Spend", "$" + (stats.spend_cents / 100).toFixed(2)],
+    ["Cost / application", stats.cost_per_application_cents == null ? "—" : "$" + (stats.cost_per_application_cents / 100).toFixed(2)],
+  ].map(([label, value]) => el("div", { class: "stat" }, el("b", {}, String(value)), el("span", {}, label)));
+
+  const states = Object.entries(stats.by_state).sort((a, b) => b[1] - a[1]);
+  target.replaceChildren(
+    el("div", { class: "funnel" }, cards),
+    el("h3", {}, "By state"),
+    el("div", { class: "wrap" },
+      el("table", {},
+        el("thead", {}, el("tr", {}, el("th", {}, "State"), el("th", {}, "Count"))),
+        el("tbody", {}, states.map(([state, count]) =>
+          el("tr", {}, el("td", {}, el("span", { class: "chip s-" + state }, state)), el("td", {}, String(count)))))))
+  );
+}
+
+function factIndex(tailored) {
+  const map = {};
+  for (const b of tailored?.bullets || []) map[b.text] = b.fact_id;
+  return map;
+}
+
+async function renderReview(target) {
+  const items = await api("/api/review");
+  if (!items.length) { target.replaceChildren(el("p", { class: "muted" }, "Queue is empty.")); return; }
+  target.replaceChildren(...items.map((item) => reviewCard(item)));
+}
+
+function reviewCard(item) {
+  const t = item.tailored || {};
+  const bullets = (t.bullets || []).map((b) =>
+    el("li", { title: `derived from fact ${b.fact_id}` }, b.text, " ", el("span", { class: "fact" }, `[${b.fact_id}]`)));
+
+  const decide = async (action) => {
+    try { await api(`/api/applications/${item.id}/${action}`, { method: "POST", body: "{}" }); render("review"); }
+    catch (err) { alert(err); }
+  };
+
+  const needs = item.needs_input
+    ? el("div", { class: "card" },
+        el("b", {}, "Needs input: " + (item.needs_input.reason || "")),
+        el("div", { class: "muted" }, item.needs_input.detail || ""),
+        el("ul", {}, (item.needs_input.questions || []).map((q) => el("li", {}, q.label))))
+    : "";
+
+  return el("div", { class: "card" },
+    el("div", { class: "row" },
+      el("b", {}, `${item.company || "?"} — ${item.title || "?"}`),
+      el("span", { class: "chip s-" + item.state }, item.state),
+      item.score != null ? el("span", { class: "chip" }, "fit " + Number(item.score).toFixed(2)) : "",
+      el("span", { class: "muted" }, item.location || ""),
+      el("span", { style: "margin-left:auto" },
+        el("button", { class: "act primary", onclick: () => decide("approve") }, "Approve"),
+        " ",
+        el("button", { class: "act", onclick: () => decide("reject") }, "Reject"))),
+    needs,
+    el("div", { class: "cols" },
+      el("div", {},
+        el("h4", {}, "Job description"),
+        el("div", { class: "jd" }, item.job_description || "")),
+      el("div", {},
+        el("h4", {}, "Tailored resume"),
+        el("p", { class: "muted" }, t.summary || ""),
+        el("ul", { class: "bullets" }, bullets),
+        el("h4", {}, "Cover letter"),
+        el("div", { class: "jd" }, t.cover_letter || ""),
+        (item.reasons || []).length ? el("h4", {}, "Why matched") : "",
+        el("ul", {}, (item.reasons || []).map((r) => el("li", { class: "muted" }, r))))));
+}
+
+async function renderApps(target) {
+  const rows = await api("/api/applications");
+  target.replaceChildren(
+    el("div", { class: "wrap" },
+      el("table", {},
+        el("thead", {}, el("tr", {}, ...["Company", "Role", "State", "Fit", "Submitted", ""].map((h) => el("th", {}, h)))),
+        el("tbody", {}, rows.map((r) =>
+          el("tr", {},
+            el("td", {}, r.company || "—"),
+            el("td", {}, r.title || "—"),
+            el("td", {}, el("span", { class: "chip s-" + r.state }, r.state)),
+            el("td", {}, r.score == null ? "—" : Number(r.score).toFixed(2)),
+            el("td", { class: "muted" }, (r.submitted_at || "").slice(0, 16).replace("T", " ") || "—"),
+            el("td", {}, el("button", { class: "act", onclick: () => showTimeline(r.id) }, "Timeline"))))))),
+    el("div", { id: "timeline" }));
+}
+
+async function showTimeline(id) {
+  const app = await api(`/api/applications/${id}`);
+  $("#timeline").replaceChildren(
+    el("div", { class: "card" },
+      el("b", {}, `${app.company} — ${app.title}`),
+      el("div", { class: "log" },
+        (app.timeline || []).map((e) =>
+          el("div", { class: e.level },
+            `${(e.ts || "").slice(0, 19).replace("T", " ")}  [${e.stage}] ${e.event_type}  ${e.message}\n`)))));
+}
+
+let currentStream = null;
+async function renderRuns(target) {
+  const runs = await api("/api/runs");
+  const logBox = el("div", { class: "log" }, "Select a run to tail.");
+  const select = el("select", { onchange: (e) => tail(e.target.value, logBox) },
+    el("option", { value: "" }, "—"),
+    runs.map((r) => el("option", { value: r.id },
+      `${(r.started_at || "").slice(0, 19).replace("T", " ")} · ${r.stage} · ${r.status} · $${(r.cost_cents / 100).toFixed(4)}`)));
+  target.replaceChildren(el("div", { class: "row" }, el("span", { class: "muted" }, "Run"), select), logBox);
+}
+
+function tail(runId, logBox) {
+  if (currentStream) { currentStream.close(); currentStream = null; }
+  logBox.replaceChildren();
+  if (!runId) return;
+  const source = new EventSource(`/api/runs/${runId}/stream`);
+  currentStream = source;
+  source.addEventListener("log", (evt) => {
+    const e = JSON.parse(evt.data);
+    logBox.append(el("div", { class: e.level },
+      `${(e.ts || "").slice(0, 19).replace("T", " ")}  ${e.event_type.padEnd(22)} ${e.message}\n`));
+    logBox.scrollTop = logBox.scrollHeight;
+  });
+  source.addEventListener("end", () => { logBox.append(el("div", { class: "muted" }, "— run finished —")); source.close(); });
+  source.onerror = () => { logBox.append(el("div", { class: "warn" }, "\n[stream interrupted; SSE will retry]\n")); };
+}
+
+render("dashboard");
+</script>
+</body>
+</html>

@@ -1,0 +1,30 @@
+<style>
+  @page { size: Letter; margin: 1in; }
+  body { font-family: Georgia, "Times New Roman", serif; font-size: 11pt; line-height: 1.55; color: #111; }
+  .header { font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; margin-bottom: 26px; }
+  .name { font-size: 15pt; font-weight: 600; }
+  .contact { font-size: 9pt; color: #444; }
+  .contact span + span::before { content: " · "; color: #999; }
+  .to { margin-bottom: 20px; color: #333; }
+  p { margin: 0 0 12px; }
+  .sign { margin-top: 22px; }
+</style>
+
+<div class="header">
+  <div class="name">{{ name }}</div>
+  <div class="contact">
+    {% if email %}<span>{{ email }}</span>{% endif %}
+    {% if phone %}<span>{{ phone }}</span>{% endif %}
+    {% if location %}<span>{{ location }}</span>{% endif %}
+  </div>
+</div>
+
+<div class="to">
+  {{ date }}<br>
+  {% if company %}{{ company }}<br>{% endif %}
+  Re: {{ title }}
+</div>
+
+{% for paragraph in paragraphs %}<p>{{ paragraph }}</p>{% endfor %}
+
+<div class="sign">Sincerely,<br>{{ name }}</div>

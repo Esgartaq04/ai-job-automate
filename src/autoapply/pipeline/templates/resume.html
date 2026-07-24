@@ -1,0 +1,46 @@
+<style>
+  @page { size: Letter; margin: 0.6in 0.7in; }
+  body { font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; font-size: 10.5pt; line-height: 1.4; color: #111; }
+  h1 { font-size: 19pt; margin: 0 0 2px; letter-spacing: -0.01em; }
+  .contact { font-size: 9pt; color: #444; margin-bottom: 14px; }
+  .contact span + span::before { content: " · "; color: #999; }
+  h2 { font-size: 10pt; text-transform: uppercase; letter-spacing: 0.08em; color: #333;
+       border-bottom: 1px solid #ddd; padding-bottom: 3px; margin: 16px 0 8px; }
+  .summary { margin: 0 0 4px; }
+  ul { margin: 0; padding-left: 16px; }
+  li { margin-bottom: 5px; }
+  .role { font-weight: 600; }
+  .meta { color: #555; font-size: 9pt; }
+  .group { margin-bottom: 10px; }
+  .skills { color: #333; }
+</style>
+
+<h1>{{ name }}</h1>
+<div class="contact">
+  {% if headline %}<span>{{ headline }}</span>{% endif %}
+  {% if email %}<span>{{ email }}</span>{% endif %}
+  {% if phone %}<span>{{ phone }}</span>{% endif %}
+  {% if location %}<span>{{ location }}</span>{% endif %}
+  {% if links %}{% for link in links %}<span>{{ link }}</span>{% endfor %}{% endif %}
+</div>
+
+{% if summary %}
+<h2>Summary</h2>
+<p class="summary">{{ summary }}</p>
+{% endif %}
+
+<h2>Experience</h2>
+{% for group in groups %}
+<div class="group">
+  <div class="role">{{ group.role }}{% if group.org %} — {{ group.org }}{% endif %}</div>
+  <div class="meta">{{ group.window }}</div>
+  <ul>
+    {% for bullet in group.bullets %}<li>{{ bullet }}</li>{% endfor %}
+  </ul>
+</div>
+{% endfor %}
+
+{% if skills %}
+<h2>Skills</h2>
+<p class="skills">{{ skills|join(" · ") }}</p>
+{% endif %}

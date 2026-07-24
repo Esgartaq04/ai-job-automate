@@ -1,0 +1,51 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: autoapply
+      POSTGRES_PASSWORD: autoapply
+      POSTGRES_DB: autoapply
+    ports: ["5432:5432"]
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U autoapply"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build: .
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      AUTOAPPLY_DATABASE_URL: postgresql+psycopg://autoapply:autoapply@db:5432/autoapply
+      AUTOAPPLY_ARTIFACT_URI: local:///var/lib/autoapply/artifacts
+      AUTOAPPLY_API_TOKEN: ${AUTOAPPLY_API_TOKEN:-dev-token-change-me}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      AUTOAPPLY_DRY_RUN: ${AUTOAPPLY_DRY_RUN:-false}
+    ports: ["8000:8000"]
+    volumes: ["artifacts:/var/lib/autoapply/artifacts"]
+    command: >
+      sh -c "autoapply init-db &&
+             uvicorn autoapply.api.main:app --host 0.0.0.0 --port 8000"
+
+  # The submit worker shares the image but is driven manually — it only ever acts
+  # on applications a human approved. Run: docker compose run --rm worker submit
+  worker:
+    build: .
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      AUTOAPPLY_DATABASE_URL: postgresql+psycopg://autoapply:autoapply@db:5432/autoapply
+      AUTOAPPLY_ARTIFACT_URI: local:///var/lib/autoapply/artifacts
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      AUTOAPPLY_DRY_RUN: ${AUTOAPPLY_DRY_RUN:-false}
+    volumes:
+      - "artifacts:/var/lib/autoapply/artifacts"
+      - "./docs:/app/docs:ro"
+    entrypoint: ["autoapply"]
+    command: ["status"]
+
+volumes:
+  pgdata:
+  artifacts:

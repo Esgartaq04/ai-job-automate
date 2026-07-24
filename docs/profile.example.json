@@ -1,0 +1,67 @@
+{
+  "profile": {
+    "name": "Ada Lovelace",
+    "headline": "Software engineer — backend and data infrastructure",
+    "email": "ada+apply@example.com",
+    "phone": "555-0100",
+    "location": "Chicago, IL",
+    "linkedin": "https://linkedin.com/in/example",
+    "github": "https://github.com/example",
+    "links": ["github.com/example"],
+    "work_authorized": "Yes",
+    "requires_sponsorship": "No",
+    "years_experience": "3",
+    "preferences": {
+      "needs_sponsorship": false,
+      "has_clearance": false,
+      "max_years_required": 5,
+      "remote_ok": true,
+      "allowed_locations": ["Chicago", "Remote", "New York"],
+      "excluded_companies": [],
+      "min_score": 0.65,
+      "recall_k": 60
+    }
+  },
+  "facts": [
+    {
+      "id": "exp_001",
+      "type": "experience",
+      "org": "Morningstar",
+      "role": "Software Engineering Intern",
+      "start": "2026-06",
+      "end": null,
+      "text": "Built an internal pricing service in Python that replaced a nightly batch job with an on-demand API.",
+      "skills": ["python", "fastapi", "postgres"]
+    },
+    {
+      "id": "exp_002",
+      "type": "experience",
+      "org": "Morningstar",
+      "role": "Software Engineering Intern",
+      "start": "2026-06",
+      "end": null,
+      "text": "Owned the CI pipeline for 4 repositories, including test parallelization and container image builds.",
+      "skills": ["ci/cd", "docker", "github actions"]
+    },
+    {
+      "id": "prj_001",
+      "type": "project",
+      "org": "Personal",
+      "role": "Author",
+      "start": "2025-01",
+      "end": "2025-08",
+      "text": "Wrote a distributed web crawler with a Redis-backed frontier and polite per-domain rate limiting.",
+      "skills": ["python", "redis", "asyncio"]
+    },
+    {
+      "id": "edu_001",
+      "type": "education",
+      "org": "University of Illinois",
+      "role": "BS Computer Science",
+      "start": "2023-08",
+      "end": "2027-05",
+      "text": "Coursework in distributed systems, databases, and machine learning.",
+      "skills": ["algorithms", "databases"]
+    }
+  ]
+}
