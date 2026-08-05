@@ -14,6 +14,7 @@ is the real code path.
 from __future__ import annotations
 
 import contextlib
+import datetime as dt
 import os
 
 import pytest
@@ -51,8 +52,9 @@ def clean_db(env):
     with get_engine().begin() as conn:
         conn.execute(
             text(
-                "TRUNCATE run_events, runs, applications, matches, artifacts, jobs, "
-                "companies, facts, profiles, users, field_map_cache RESTART IDENTITY CASCADE"
+                "TRUNCATE run_events, runs, processed_messages, applications, matches, "
+                "artifacts, jobs, companies, facts, profiles, users, field_map_cache "
+                "RESTART IDENTITY CASCADE"
             )
         )
     return env
@@ -129,7 +131,9 @@ class FakePage:
     def locator(self, selector):
         if selector == "body":
             return FakeLocator(self, selector)
-        if "recaptcha" in selector or "hcaptcha" in selector or "sitekey" in selector or "cf-challenge" in selector:
+        # A clean page matches none of the challenge markers. Keyed on substrings
+        # so adding a marker to the adapter doesn't silently break this fake.
+        if any(m in selector for m in ("captcha", "sitekey", "turnstile", "cf-challenge")):
             return FakeLocator(self, selector, count=0)
         if "Thank you for applying" in selector or "submitted" in selector:
             return FakeLocator(self, selector, count=1 if self.clicked else 0)
@@ -439,3 +443,70 @@ def test_escalation_pauses_instead_of_guessing(clean_db, monkeypatch):
     assert page.clicked is False, "nothing may be submitted while a field is unresolved"
     assert outcome.escalation["reason"] in ("unmapped_required_field", "long_free_text")
     assert outcome.escalation["questions"]
+
+
+def test_outcome_processing_is_idempotent(clean_db):
+    """The Gmail query is time-windowed, so consecutive runs re-fetch the same
+    mail. A second pass must not re-bill the classifier or try to re-transition
+    an application that has already moved on."""
+    from conftest import StubLLM
+
+    from autoapply.db import session_scope
+    from autoapply.events import start_run, transition
+    from autoapply.models import Application, Company, Job, ProcessedMessage, User
+    from autoapply.pipeline import process_messages
+    from autoapply.pipeline.outcome import Message
+
+    with session_scope() as session:
+        user = User(email="ada3@example.com")
+        session.add(user)
+        session.flush()
+        company = Company(name="ExampleCorp", ats_type="greenhouse", board_token="ex3")
+        session.add(company)
+        session.flush()
+        job = Job(
+            company_id=company.id, ats_job_id="1", title="Engineer", location="Chicago",
+            description="d", apply_url="https://x", canonical_hash="h3", content_hash="c3",
+        )
+        session.add(job)
+        session.flush()
+        application = Application(user_id=user.id, job_id=job.id, state="discovered")
+        session.add(application)
+        session.flush()
+        run = start_run(session, stage="test", application_id=application.id)
+        for state in ("matched", "drafted", "pending_review", "approved", "submitting", "submitted"):
+            transition(session, application, state, run=run)
+        application.submitted_at = dt.datetime.now(dt.UTC)
+        user_id, application_id = user.id, application.id
+
+    message = Message(
+        message_id="gmail-abc123",
+        subject="Thanks for applying",
+        sender="no-reply@examplecorp.com",
+        body="We received your application.",
+    )
+    answer = {"category": "confirmation", "company_guess": "ExampleCorp", "confidence": 0.95}
+
+    with session_scope() as session:
+        first = StubLLM([answer])
+        results = process_messages(session, user_id, [message], llm=first)
+        assert results[0].state == "confirmed"
+        assert len(first.calls) == 1
+        assert session.get(Application, application_id).state == "confirmed"
+        assert session.get(ProcessedMessage, "gmail-abc123") is not None
+
+    # Same message again: skipped before the model is consulted.
+    with session_scope() as session:
+        second = StubLLM([answer])
+        results = process_messages(session, user_id, [message], llm=second)
+        assert results == []
+        assert second.calls == [], "classifier was billed for an already-seen message"
+        assert session.get(Application, application_id).state == "confirmed"
+
+    # --reprocess forces it through; the illegal re-transition is refused, not applied.
+    with session_scope() as session:
+        third = StubLLM([answer])
+        results = process_messages(session, user_id, [message], llm=third, reprocess=True)
+        assert len(third.calls) == 1
+        assert "not legal" in results[0].detail
+        assert session.get(Application, application_id).state == "confirmed"

@@ -4,7 +4,7 @@ help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-12s\033[0m %s\n", $$1, $$2}'
 
 install:  ## Install the package plus dev extras and the Chromium build
-	pip install -e ".[dev]"
+	pip install -e ".[dev]"   # add ".[dev,gmail]" for stage-5 Gmail support
 	python -m playwright install chromium
 
 db:  ## Start only Postgres+pgvector
@@ -19,10 +19,9 @@ down:  ## Stop everything
 init-db:  ## Apply migrations against AUTOAPPLY_DATABASE_URL
 	autoapply init-db
 
-seed:  ## Load the example profile and a couple of Greenhouse boards
+seed:  ## Load the example profile and one board per supported ATS
 	autoapply load-profile docs/profile.example.json --email you@example.com
-	autoapply companies add "Anthropic" anthropic
-	autoapply companies add "Stripe" stripe
+	autoapply companies import docs/companies.example.json
 
 test:  ## Run the test suite (no network, no API key needed)
 	pytest -q

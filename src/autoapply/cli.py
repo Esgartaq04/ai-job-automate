@@ -17,6 +17,7 @@ from .db import apply_migrations, session_scope
 from .events import log_event, start_run, transition
 from .llm.embeddings import get_embedder
 from .models import Application, Company, Fact, Job, Match, Profile, User
+from .pipeline.gmail import GmailSource
 from .pipeline.ingest import ingest_all, ingest_company
 from .pipeline.match import Preferences, match_profile
 from .pipeline.outcome import Message, process_messages
@@ -237,24 +238,56 @@ def submit(limit: int = typer.Option(5)) -> None:
 
 
 @app.command()
-def outcomes(email: str = typer.Option(...), path: Path = typer.Option(..., help="JSON array of messages")) -> None:
-    """Stage 5 — classify inbound mail and close the funnel."""
-    payload = json.loads(path.read_text())
-    messages = [
-        Message(
-            message_id=str(entry.get("id", uuidlib.uuid4())),
-            subject=entry.get("subject", ""),
-            sender=entry.get("from", ""),
-            body=entry.get("body", ""),
+def outcomes(
+    email: str = typer.Option(...),
+    path: Path | None = typer.Option(None, help="JSON array of messages"),
+    gmail: bool = typer.Option(False, "--gmail", help="Pull from Gmail instead of a file"),
+    query: str | None = typer.Option(None, help="Gmail search query; overrides the configured one"),
+    reprocess: bool = typer.Option(False, help="Re-handle messages already recorded as processed"),
+) -> None:
+    """Stage 5 — classify inbound mail and close the funnel.
+
+    Source is either a JSON export (--path) or Gmail (--gmail). Already-processed
+    messages are skipped before the classifier runs, so re-running is cheap.
+    """
+    if gmail == bool(path):
+        raise typer.BadParameter("pass exactly one of --path or --gmail")
+
+    if gmail:
+        settings = get_settings()
+        source = GmailSource(
+            credentials_path=Path(settings.gmail_credentials_path).expanduser(),
+            token_path=Path(settings.gmail_token_path).expanduser(),
+            query=query or settings.gmail_query,
         )
-        for entry in payload
-    ]
+        try:
+            messages = source.fetch()
+        except ImportError as exc:  # google libs are an optional extra
+            raise typer.BadParameter(
+                'Gmail support needs the extra: pip install -e ".[gmail]"'
+            ) from exc
+        typer.echo(f"fetched {len(messages)} messages from gmail")
+    else:
+        payload = json.loads(path.read_text())  # type: ignore[union-attr]
+        messages = [
+            Message(
+                message_id=str(entry.get("id", uuidlib.uuid4())),
+                subject=entry.get("subject", ""),
+                sender=entry.get("from", ""),
+                body=entry.get("body", ""),
+            )
+            for entry in payload
+        ]
+
     with session_scope() as session:
         user = session.scalar(select(User).where(User.email == email))
         if user is None:
             raise typer.BadParameter(f"unknown user {email}")
-        for result in process_messages(session, user.id, messages):
+        results = process_messages(session, user.id, messages, reprocess=reprocess)
+        for result in results:
             typer.echo(f"  {result.category:18} {result.state or '-':10} {result.detail}")
+        skipped = len(messages) - len(results)
+        typer.echo(f"handled {len(results)}, skipped {skipped} already processed")
 
 
 @app.command()

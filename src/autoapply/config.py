@@ -40,6 +40,11 @@ class Settings(BaseSettings):
     circuit_failure_threshold: int = 5
     submit_jitter_seconds: int = 45
 
+    # Gmail (stage 5 transport). Read-only scope.
+    gmail_credentials_path: str = "~/.config/autoapply/gmail_client_secret.json"
+    gmail_token_path: str = "~/.config/autoapply/gmail_token.json"
+    gmail_query: str = "newer_than:14d -category:promotions"
+
     # API
     api_host: str = "0.0.0.0"
     api_port: int = 8000

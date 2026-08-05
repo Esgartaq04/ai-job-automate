@@ -189,6 +189,22 @@ class FieldMapCache(Base):
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class ProcessedMessage(Base):
+    """Idempotency guard for outcome tracking — the Gmail query is time-windowed,
+    so the same message is fetched on consecutive runs."""
+
+    __tablename__ = "processed_messages"
+    message_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    processed_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    category: Mapped[str] = mapped_column(Text, nullable=False)
+    application_id: Mapped[uuid.UUID | None] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("applications.id")
+    )
+    detail: Mapped[str] = mapped_column(Text, default="")
+
+
 class Credential(Base):
     __tablename__ = "credentials"
     id: Mapped[uuid.UUID] = _uuid_pk()
