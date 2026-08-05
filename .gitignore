@@ -1,0 +1,20 @@
+.env
+*.pyc
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+
+# local artifacts
+artifacts/
+*.pdf
