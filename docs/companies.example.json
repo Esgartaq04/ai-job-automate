@@ -1,0 +1,20 @@
+[
+  {
+    "name": "Anthropic",
+    "ats_type": "greenhouse",
+    "board_token": "anthropic",
+    "careers_url": "https://www.anthropic.com/careers"
+  },
+  {
+    "name": "Ro",
+    "ats_type": "lever",
+    "board_token": "ro",
+    "careers_url": "https://ro.co/careers/"
+  },
+  {
+    "name": "Ashby",
+    "ats_type": "ashby",
+    "board_token": "ashby",
+    "careers_url": "https://www.ashbyhq.com/careers"
+  }
+]

@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from ..events import finish_run, log_event, start_run, transition
 from ..llm.client import LLMClient, fast_model, get_llm
-from ..models import Application, Company, Job
+from ..models import Application, Company, Job, ProcessedMessage
 
 CLASSIFY_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -125,21 +125,52 @@ def find_application(
     return None
 
 
+def _record(
+    session: Session, message: Message, category: str, application_id: Any, detail: str
+) -> None:
+    """Mark a message handled so the next time-windowed fetch skips it."""
+    session.merge(
+        ProcessedMessage(
+            message_id=message.message_id,
+            category=category,
+            application_id=application_id,
+            detail=detail,
+        )
+    )
+
+
 def process_messages(
-    session: Session, user_id: Any, messages: Iterable[Message], *, llm: LLMClient | None = None
+    session: Session,
+    user_id: Any,
+    messages: Iterable[Message],
+    *,
+    llm: LLMClient | None = None,
+    reprocess: bool = False,
 ) -> list[OutcomeResult]:
-    """Classify each message and close the funnel where it matches an application."""
+    """Classify each message and close the funnel where it matches an application.
+
+    Already-processed messages are skipped before the model is called: the Gmail
+    query is time-windowed, so consecutive runs re-fetch the same mail and a
+    second pass would both re-bill the classifier and try to re-transition an
+    application that has already moved on.
+    """
     llm = llm or get_llm()
     run = start_run(session, stage="outcome")
     results: list[OutcomeResult] = []
     total_cost = 0.0
+    skipped = 0
 
     for message in messages:
+        if not reprocess and session.get(ProcessedMessage, message.message_id) is not None:
+            skipped += 1
+            continue
+
         data, cost = classify(llm, message)
         total_cost += cost
         category = data.get("category", "other")
 
         if category == "other":
+            _record(session, message, category, None, "not application mail")
             results.append(OutcomeResult(message.message_id, category, None, None, "not application mail", cost))
             continue
 
@@ -153,6 +184,7 @@ def process_messages(
                 message=f"{category} email matched no application",
                 payload={"subject": message.subject, "company_guess": data.get("company_guess")},
             )
+            _record(session, message, category, None, "unmatched")
             results.append(OutcomeResult(message.message_id, category, None, None, "unmatched", cost))
             continue
 
@@ -160,14 +192,11 @@ def process_messages(
         from ..events import can_transition
 
         if not can_transition(application.state, target):
+            detail = f"{application.state} -> {target} not legal; ignored"
+            _record(session, message, category, application.id, detail)
             results.append(
                 OutcomeResult(
-                    message.message_id,
-                    category,
-                    application.id,
-                    application.state,
-                    f"{application.state} -> {target} not legal; ignored",
-                    cost,
+                    message.message_id, category, application.id, application.state, detail, cost
                 )
             )
             continue
@@ -180,14 +209,15 @@ def process_messages(
             message=f"{category} email from {message.sender}",
             payload={"subject": message.subject, "message_id": message.message_id},
         )
+        _record(session, message, category, application.id, "matched")
         results.append(OutcomeResult(message.message_id, category, application.id, target, "matched", cost))
 
     log_event(
         session,
         run,
         event_type="outcome.done",
-        message=f"processed {len(results)} messages",
-        payload={"cost_cents": round(total_cost, 4)},
+        message=f"processed {len(results)} messages, skipped {skipped} already seen",
+        payload={"cost_cents": round(total_cost, 4), "processed": len(results), "skipped": skipped},
     )
     finish_run(session, run, cost_cents=total_cost)
     return results

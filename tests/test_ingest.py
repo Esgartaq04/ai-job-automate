@@ -3,7 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from autoapply.ats.greenhouse import GreenhouseAdapter, strip_html
+from autoapply.ats.greenhouse import GreenhouseAdapter
+from autoapply.ats.textutil import strip_html
 from autoapply.pipeline.ingest import canonical_hash, normalize
 
 FIXTURE = Path(__file__).parent / "fixtures" / "greenhouse_board.json"
